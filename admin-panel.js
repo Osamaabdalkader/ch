@@ -1,29 +1,41 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const auth = firebase.auth();
+    // تهيئة Firebase
+    const firebaseConfig = {
+        apiKey: "AIzaSyAzYZMxqNmnLMGYnCyiJYPg2MbxZMt0co0",
+        authDomain: "osama-91b95.firebaseapp.com",
+        databaseURL: "https://osama-91b95-default-rtdb.firebaseio.com",
+        projectId: "osama-91b95",
+        storageBucket: "osama-91b95.appspot.com",
+        messagingSenderId: "118875905722",
+        appId: "1:118875905722:web:200bff1bd99db2c1caac83",
+        measurementId: "G-LEM5PVPJZC"
+    };
     
-    // التحقق من حالة تسجيل الدخول
-    auth.onAuthStateChanged((user) => {
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const database = firebase.database();
+
+    // التحقق من حالة المستخدم
+    auth.onAuthStateChanged(user => {
         if (!user) {
             window.location.href = 'index.html';
         } else {
-            // التحقق من أن المستخدم هو مدير
-            const database = firebase.database();
+            // التحقق من أن المستخدم مدير
             database.ref('users/' + user.uid).once('value')
                 .then(snapshot => {
                     const userData = snapshot.val();
-                    if (userData.role !== 'admin') {
-                        alert('ليس لديك صلاحية الوصول إلى لوحة التحكم');
-                        auth.signOut();
-                        window.location.href = 'index.html';
+                    if (userData && userData.role === 'admin') {
+                        initAdminPage(user);
                     } else {
-                        initPage(user);
+                        alert('ليس لديك صلاحية الوصول');
+                        auth.signOut();
                     }
                 });
         }
     });
 
-    function initPage(user) {
-        const database = firebase.database();
+    function initAdminPage(adminUser) {
+        // عناصر واجهة المستخدم
         const logoutBtn = document.getElementById('logoutBtn');
         const usersList = document.getElementById('usersList');
         const searchUsers = document.getElementById('searchUsers');
@@ -39,134 +51,107 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
-        // جلب قائمة المستخدمين
-        function loadUsers() {
-            database.ref('users').on('value', snapshot => {
-                usersList.innerHTML = '';
-                snapshot.forEach(child => {
-                    const userData = child.val();
-                    if (userData.role === 'user') {
-                        const userItem = document.createElement('div');
-                        userItem.className = 'user-item';
-                        userItem.dataset.userId = child.key;
-                        
-                        const userName = document.createElement('div');
-                        userName.className = 'user-name';
-                        userName.textContent = userData.name;
-                        
-                        const userEmail = document.createElement('div');
-                        userEmail.className = 'user-email';
-                        userEmail.textContent = userData.email;
-                        
-                        userItem.appendChild(userName);
-                        userItem.appendChild(userEmail);
-                        usersList.appendChild(userItem);
-                        
-                        // اختيار مستخدم لعرض المحادثة
-                        userItem.addEventListener('click', () => {
-                            document.querySelectorAll('.user-item').forEach(item => {
-                                item.classList.remove('active');
-                            });
-                            userItem.classList.add('active');
-                            loadMessages(child.key, userData.name);
-                        });
-                    }
-                });
+        // تحميل المستخدمين
+        database.ref('users').on('value', snapshot => {
+            usersList.innerHTML = '';
+            snapshot.forEach(child => {
+                const userData = child.val();
+                if (userData.role === 'user') {
+                    const userElement = document.createElement('div');
+                    userElement.className = 'user-item';
+                    userElement.dataset.userId = child.key;
+                    
+                    userElement.innerHTML = `
+                        <div class="user-name">${userData.name}</div>
+                        <div class="user-email">${userData.email}</div>
+                    `;
+                    
+                    userElement.addEventListener('click', () => {
+                        document.querySelectorAll('.user-item').forEach(el => el.classList.remove('active'));
+                        userElement.classList.add('active');
+                        loadMessages(child.key, userData.name);
+                    });
+                    
+                    usersList.appendChild(userElement);
+                }
             });
-        }
+        });
 
-        // تحميل الرسائل مع مستخدم معين
-        function loadMessages(userId, name) {
-            currentUserName.textContent = name;
+        // إرسال الرسائل
+        sendBtn.addEventListener('click', () => {
+            const activeUser = document.querySelector('.user-item.active');
+            if (!activeUser) return alert('اختر مستخدمًا أولاً');
+            
+            const userId = activeUser.dataset.userId;
+            const content = messageInput.value.trim();
+            if (!content) return;
+            
+            const newMessage = {
+                senderId: adminUser.uid,
+                receiverId: userId,
+                content: content,
+                timestamp: Date.now(),
+                isRead: false,
+                senderRole: 'admin',
+                receiverRole: 'user'
+            };
+            
+            database.ref('messages').push().set(newMessage)
+                .then(() => {
+                    messageInput.value = '';
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                });
+        });
+
+        // بحث المستخدمين
+        searchUsers.addEventListener('input', () => {
+            const term = searchUsers.value.toLowerCase();
+            document.querySelectorAll('.user-item').forEach(el => {
+                const name = el.querySelector('.user-name').textContent.toLowerCase();
+                const email = el.querySelector('.user-email').textContent.toLowerCase();
+                el.style.display = (name.includes(term) || email.includes(term) ? 'block' : 'none';
+            });
+        });
+
+        // تحميل الرسائل
+        function loadMessages(userId, userName) {
+            currentUserName.textContent = userName;
             messagesContainer.innerHTML = '';
-            messageInput.disabled = false;
-            sendBtn.disabled = false;
             
             database.ref('messages')
                 .orderByChild('timestamp')
                 .on('child_added', snapshot => {
                     const message = snapshot.val();
                     
-                    // عرض الرسائل بين الإدارة وهذا المستخدم
-                    if ((message.senderId === user.uid && message.receiverId === userId) || 
-                        (message.senderId === userId && message.receiverId === user.uid)) {
-                        displayMessage(message);
+                    if ((message.senderId === adminUser.uid && message.receiverId === userId) || 
+                        (message.senderId === userId && message.receiverId === adminUser.uid)) {
                         
-                        // تحديث حالة الرسالة كمقروءة إذا كانت مرسلة إلى الإدارة
-                        if (message.receiverId === user.uid && !message.isRead) {
+                        displayMessage(message, adminUser.uid);
+                        
+                        if (message.receiverId === adminUser.uid && !message.isRead) {
                             database.ref('messages/' + snapshot.key).update({ isRead: true });
                         }
                     }
                 });
         }
 
-        function displayMessage(message) {
+        function displayMessage(message, currentUserId) {
             const messageDiv = document.createElement('div');
-            messageDiv.className = message.senderId === user.uid ? 
+            messageDiv.className = message.senderId === currentUserId ? 
                 'message sent' : 'message received';
             
-            const messageContent = document.createElement('div');
-            messageContent.className = 'message-content';
-            messageContent.textContent = message.content;
+            messageDiv.innerHTML = `
+                <div class="message-content">${message.content}</div>
+                <div class="message-time">${formatTime(message.timestamp)}</div>
+            `;
             
-            const messageTime = document.createElement('div');
-            messageTime.className = 'message-time';
-            messageTime.textContent = formatTime(message.timestamp);
-            
-            messageDiv.appendChild(messageContent);
-            messageDiv.appendChild(messageTime);
             messagesContainer.appendChild(messageDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
 
-        // إرسال رسالة إلى مستخدم
-        sendBtn.addEventListener('click', () => {
-            const activeUser = document.querySelector('.user-item.active');
-            if (!activeUser) {
-                alert('الرجاء اختيار مستخدم أولاً');
-                return;
-            }
-            
-            const message = messageInput.value.trim();
-            if (!message) return;
-            
-            const userId = activeUser.dataset.userId;
-            
-            const newMessageRef = database.ref('messages').push();
-            newMessageRef.set({
-                senderId: user.uid,
-                receiverId: userId,
-                content: message,
-                timestamp: Date.now(),
-                isRead: false,
-                senderRole: 'admin',
-                receiverRole: 'user'
-            }).then(() => {
-                messageInput.value = '';
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            });
-        });
-
-        // بحث في المستخدمين
-        searchUsers.addEventListener('input', () => {
-            const searchTerm = searchUsers.value.toLowerCase();
-            document.querySelectorAll('.user-item').forEach(item => {
-                const name = item.querySelector('.user-name').textContent.toLowerCase();
-                const email = item.querySelector('.user-email').textContent.toLowerCase();
-                if (name.includes(searchTerm) || email.includes(searchTerm)) {
-                    item.style.display = 'block';
-                } else {
-                    item.style.display = 'none';
-                }
-            });
-        });
-
         function formatTime(timestamp) {
             const date = new Date(timestamp);
-            return `${date.getHours()}:${date.getMinutes() < 10 ? '0' : ''}${date.getMinutes()}`;
+            return `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
         }
-
-        // تحميل قائمة المستخدمين عند البدء
-        loadUsers();
     }
 });
