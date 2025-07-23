@@ -85,11 +85,4 @@ document.addEventListener('DOMContentLoaded', () => {
         authMessage.textContent = message;
         authMessage.className = `message ${type}`;
     }
-
-    // تتبع حالة المصادقة
-    auth.onAuthStateChanged((user) => {
-        if (user) {
-            checkUserRole(user.uid);
-        }
-    });
 });
